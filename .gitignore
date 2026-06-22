@@ -16,3 +16,16 @@ node_modules
 .DS_Store
 .vercel
 venv
+
+# Model and large caches
+.model-cache/
+*.onnx
+
+# Editor and IDE
+.vscode/
+.idea/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
