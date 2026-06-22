@@ -83,10 +83,10 @@ git clone https://github.com/shivamsid-47/v0-deepfake-detection-extension.git
 cd v0-deepfake-detection-extension
 
 # Install dependencies
-pnpm install
+npm install
 
 # Run development server
-pnpm dev
+npm dev
 
 # Open http://localhost:3000
 ```
