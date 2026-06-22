@@ -3,19 +3,22 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-env.allowLocalModels = false;
+// Allow local caching so model isn't re-downloaded every restart
+env.allowLocalModels = true;
+env.cacheDir = path.join(process.cwd(), '.model-cache'); // cache in project dir
 
 let classifier: any = null;
 
 export async function getImageClassifier() {
   if (!classifier) {
-    console.log('🖼️ Loading CommunityForensics Deepfake Detection model...');
+    console.log('🖼️ Loading deepfake detection model...');
     try {
-      // Use the new model here
-      classifier = await pipeline(
-        'image-classification',
-        'buildborderless/CommunityForensics-DeepfakeDet-ViT'
-      );
+      
+classifier = await pipeline(
+  'image-classification',
+  'onnx-community/Deep-Fake-Detector-v2-Model-ONNX',
+  { quantized: false }  // ← forces model.onnx instead of model_quantized.onnx
+);
       console.log('✅ Image model loaded.');
     } catch (error) {
       console.error('❌ Failed to load model:', error);
@@ -25,18 +28,18 @@ export async function getImageClassifier() {
   return classifier;
 }
 
-// The detectImageDeepfake function remains unchanged
 export async function detectImageDeepfake(imageBuffer: Buffer) {
+  const tmpFile = path.join(os.tmpdir(), `deepfake-${Date.now()}.jpg`);
   try {
     const model = await getImageClassifier();
-    const tmpDir = os.tmpdir();
-    const tmpFile = path.join(tmpDir, `img-${Date.now()}.jpg`);
     fs.writeFileSync(tmpFile, imageBuffer);
     const result = await model(tmpFile);
-    fs.unlinkSync(tmpFile);
     return result;
   } catch (error) {
     console.error('Error in detectImageDeepfake:', error);
     throw error;
+  } finally {
+    // Always clean up tmp file even if model throws
+    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   }
 }

@@ -61,6 +61,7 @@
     "tailwind-merge": "^3.3.1",
     "torch": "^0.2.7",
     "vaul": "^1.1.2",
+    "wavefile": "^11.0.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

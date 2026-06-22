@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const score = result[0]?.score || 0;
 
     // Check if the label indicates a fake image
-    const isFake = label.toLowerCase().includes('fake') || label === 'LABEL_1';
+    const isFake = label.toLowerCase() === 'deepfake';
     const verdict = isFake ? 'deepfake' : 'authentic';
     const confidence = isFake ? score : 1 - score;
 
