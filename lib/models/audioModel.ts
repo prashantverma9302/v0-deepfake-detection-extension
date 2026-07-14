@@ -1,83 +1,35 @@
-import { pipeline, env } from '@xenova/transformers';
-import { WaveFile } from 'wavefile';  // ✅ named import
+const HF_API = 'https://api-inference.huggingface.co/models';
+const TOKEN = process.env.HF_API_TOKEN;
+const AUDIO_MODEL = 'MelyssaMT/deepfake-audio-detection';
 
-env.allowLocalModels = true;
-env.allowRemoteModels = true;
-env.cacheDir = require('path').join(process.cwd(), '.model-cache');
+export async function detectAudioDeepfake(buffer: Buffer) {
+  const res = await fetch(`${HF_API}/${AUDIO_MODEL}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'Content-Type': 'application/octet-stream',
+    },
+    body: buffer,
+  });
 
-let audioClassifier: any = null;
+  if (!res.ok) throw new Error(`HF API error: ${await res.text()}`);
 
-export async function getAudioClassifier() {
-  if (!audioClassifier) {
-    console.log('🎵 Loading audio model...');
-    try {
-      audioClassifier = await pipeline(
-        'audio-classification',
-        'Xenova/wav2vec2-base-superb-ks',
-        { quantized: true }
-      );
-      console.log('✅ Audio model loaded.');
-    } catch (error) {
-      console.error('❌ Failed to load audio model:', error);
-      throw error;
-    }
-  }
-  return audioClassifier;
-}
+  const results: Array<{ label: string; score: number }> = await res.json();
 
-function decodeWavToFloat32(buffer: Buffer): Float32Array {
-  const wav = new WaveFile(buffer);
-  wav.toBitDepth('32f');
-  wav.toSampleRate(16000);
+  const fakeEntry = results.find(r => r.label.toLowerCase().includes('fake') || r.label === 'spoof');
+  const realEntry = results.find(r => r.label.toLowerCase().includes('real') || r.label === 'bonafide');
+  const fakeScore = fakeEntry?.score ?? 1 - (realEntry?.score ?? 0.5);
+  const realScore = 1 - fakeScore;
 
-  let samples: any = wav.getSamples();
+  let verdict: 'deepfake' | 'uncertain' | 'authentic';
+  if (fakeScore >= 0.65) verdict = 'deepfake';
+  else if (fakeScore <= 0.35) verdict = 'authentic';
+  else verdict = 'uncertain';
 
-  if (Array.isArray(samples)) {
-    if (samples.length > 1) {
-      // Stereo → mono
-      const SCALING_FACTOR = Math.sqrt(2);
-      for (let i = 0; i < samples[0].length; i++) {
-        samples[0][i] = SCALING_FACTOR * (samples[0][i] + samples[1][i]) / 2;
-      }
-    }
-    samples = samples[0];
-  }
-
-  return samples as Float32Array;
-}
-
-export async function detectAudioDeepfake(audioBuffer: Buffer): Promise<{
-  verdict: 'deepfake' | 'authentic';
-  fakeScore: number;
-  realScore: number;
-  rawResults: any[];
-}> {
-  try {
-    const classifier = await getAudioClassifier();
-
-    // ✅ Decode to Float32Array — no file path, no AudioContext needed
-    const audioData = decodeWavToFloat32(audioBuffer);
-
-    const results = await classifier(audioData, {
-      sampling_rate: 16000,
-      top_k: null,
-    });
-
-    const scores: number[] = results.map((r: any) => r.score);
-    const entropy = -scores.reduce((sum: number, p: number) =>
-      p > 0 ? sum + p * Math.log(p) : sum, 0
-    );
-    const normalizedEntropy = entropy / Math.log(scores.length);
-    const fakeScore = Math.min(normalizedEntropy * 1.5, 1.0);
-
-    return {
-      verdict: fakeScore > 0.5 ? 'deepfake' : 'authentic',
-      fakeScore,
-      realScore: 1 - fakeScore,
-      rawResults: results,
-    };
-  } catch (error) {
-    console.error('Error in audio deepfake detection:', error);
-    throw error;
-  }
+  return {
+    verdict,
+    fakeScore: parseFloat(fakeScore.toFixed(4)),
+    realScore: parseFloat(realScore.toFixed(4)),
+    rawResults: results,
+  };
 }

@@ -1,91 +1,60 @@
-// @xenova/transformers has NO video-classification pipeline.
-// Strategy: extract frames from video → run image classifier on each frame → aggregate
-import { pipeline, env } from '@xenova/transformers';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { execSync } from 'child_process';
+// Video = run image model on each frame via HF API
+const HF_API = 'https://api-inference.huggingface.co/models';
+const TOKEN = process.env.HF_API_TOKEN;
+const IMAGE_MODEL = 'dima806/deepfake_vs_real_image_detection';
 
-env.allowLocalModels = true;
-env.cacheDir = path.join(process.cwd(), '.model-cache');
+async function classifyFrame(frameBase64: string): Promise<number> {
+  const base64Data = frameBase64.replace(/^data:image\/\w+;base64,/, '');
+  const buffer = Buffer.from(base64Data, 'base64');
 
-let frameClassifier: any = null;
+  const res = await fetch(`${HF_API}/${IMAGE_MODEL}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'Content-Type': 'application/octet-stream',
+    },
+    body: buffer,
+  });
 
-export async function getVideoFrameClassifier() {
-  if (!frameClassifier) {
-    console.log('🎬 Loading video deepfake detection model (frame-based)...');
-    try {
-      // videoModel.ts — line 19-22, change the model:
-frameClassifier = await pipeline(
-  'image-classification',
-  'onnx-community/Deep-Fake-Detector-v2-Model-ONNX',
-  { quantized: false }  // ← forces model.onnx instead of model_quantized.onnx
-);
-      console.log('✅ Video frame classifier loaded.');
-    } catch (error) {
-      console.error('❌ Failed to load video model:', error);
-      throw error;
-    }
-  }
-  return frameClassifier;
+  if (!res.ok) throw new Error(`HF API error: ${await res.text()}`);
+
+  const results: Array<{ label: string; score: number }> = await res.json();
+  const fakeEntry = results.find(r => r.label.toLowerCase().includes('fake'));
+  return fakeEntry?.score ?? 0.5;
 }
 
-const FRAMES_TO_SAMPLE = 8; // number of evenly-spaced frames to analyze
+export async function detectVideoDeepfake(frames: string[]) {
+  // Run all frames in parallel
+  const fakeScores = await Promise.all(frames.map(classifyFrame));
 
-export async function detectVideoDeepfake(videoBuffer: Buffer) {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-'));
-  const tmpVideo = path.join(tmpDir, `input-${Date.now()}.mp4`);
+  // 75th percentile aggregation
+  const sorted = [...fakeScores].sort((a, b) => a - b);
+  const p75 = sorted[Math.floor(sorted.length * 0.75)];
 
-  try {
-    const classifier = await getVideoFrameClassifier();
+  // Temporal inconsistency penalty
+  const mean = fakeScores.reduce((a, b) => a + b, 0) / fakeScores.length;
+  const variance = fakeScores.reduce((s, x) => s + Math.pow(x - mean, 2), 0) / fakeScores.length;
+  const temporalConsistency = Math.max(0, 1 - Math.sqrt(variance) / 0.5);
+  const finalFakeScore = Math.min(p75 + (1 - temporalConsistency) * 0.15, 1.0);
+  const finalRealScore = 1 - finalFakeScore;
 
-    // Write video to tmp file
-    fs.writeFileSync(tmpVideo, videoBuffer);
+  let verdict: 'deepfake' | 'uncertain' | 'authentic';
+  if (finalFakeScore >= 0.65) verdict = 'deepfake';
+  else if (finalFakeScore <= 0.35) verdict = 'authentic';
+  else verdict = 'uncertain';
 
-    // Extract frames using ffmpeg (must be installed: brew install ffmpeg)
-    // Extracts FRAMES_TO_SAMPLE frames evenly spaced across the video
-    const framePattern = path.join(tmpDir, 'frame-%03d.jpg');
-    execSync(
-      `ffmpeg -i "${tmpVideo}" -vf "select=not(mod(n\\,30))" -vframes ${FRAMES_TO_SAMPLE} -q:v 2 "${framePattern}" -y`,
-      { stdio: 'pipe' }
-    );
-
-    const frameFiles = fs.readdirSync(tmpDir)
-      .filter(f => f.startsWith('frame-') && f.endsWith('.jpg'))
-      .map(f => path.join(tmpDir, f));
-
-    if (frameFiles.length === 0) {
-      throw new Error('No frames extracted from video — is ffmpeg installed?');
-    }
-
-    // Run classifier on each frame
-    const frameResults = await Promise.all(
-      frameFiles.map(async (framePath) => {
-        const res = await classifier(framePath);
-        return res[0]; // { label, score }
-      })
-    );
-
-    // Aggregate: average fake scores across all frames
-    const fakeScores = frameResults.map(r => {
-      const isFake = r.label.toLowerCase() === 'deepfake';
-      return isFake ? r.score : 1 - r.score;
-    });
-
-    const avgFakeScore = fakeScores.reduce((a, b) => a + b, 0) / fakeScores.length;
-
-    return {
-      aggregated: true,
-      framesAnalyzed: frameResults.length,
-      fakeScore: avgFakeScore,
-      realScore: 1 - avgFakeScore,
-      frameResults, // per-frame breakdown
-    };
-  } catch (error) {
-    console.error('Error in video deepfake detection:', error);
-    throw error;
-  } finally {
-    // Cleanup all tmp files
-    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+  return {
+    verdict,
+    confidence: verdict === 'deepfake' ? finalFakeScore : finalRealScore,
+    scores: {
+      fake: parseFloat(finalFakeScore.toFixed(4)),
+      real: parseFloat(finalRealScore.toFixed(4)),
+    },
+    analysis: {
+      framesAnalyzed: frames.length,
+      temporalConsistency: parseFloat(temporalConsistency.toFixed(4)),
+      frameScores: fakeScores.map(s => parseFloat(s.toFixed(4))),
+    },
+    type: 'video',
+  };
 }

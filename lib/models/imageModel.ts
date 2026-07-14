@@ -1,45 +1,38 @@
-import { pipeline, env } from '@xenova/transformers';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+const HF_API = 'https://api-inference.huggingface.co/models';
+const TOKEN = process.env.HF_API_TOKEN;
+const IMAGE_MODEL = 'dima806/deepfake_vs_real_image_detection';
 
-// Allow local caching so model isn't re-downloaded every restart
-env.allowLocalModels = true;
-env.cacheDir = path.join(process.cwd(), '.model-cache'); // cache in project dir
+export async function detectImageDeepfake(buffer: Buffer) {
+  const res = await fetch(`${HF_API}/${IMAGE_MODEL}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'Content-Type': 'application/octet-stream',
+    },
+    body: buffer,
+  });
 
-let classifier: any = null;
-
-export async function getImageClassifier() {
-  if (!classifier) {
-    console.log('🖼️ Loading deepfake detection model...');
-    try {
-      
-classifier = await pipeline(
-  'image-classification',
-  'onnx-community/Deep-Fake-Detector-v2-Model-ONNX',
-  { quantized: false }  // ← forces model.onnx instead of model_quantized.onnx
-);
-      console.log('✅ Image model loaded.');
-    } catch (error) {
-      console.error('❌ Failed to load model:', error);
-      throw error;
-    }
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HF API error: ${err}`);
   }
-  return classifier;
-}
 
-export async function detectImageDeepfake(imageBuffer: Buffer) {
-  const tmpFile = path.join(os.tmpdir(), `deepfake-${Date.now()}.jpg`);
-  try {
-    const model = await getImageClassifier();
-    fs.writeFileSync(tmpFile, imageBuffer);
-    const result = await model(tmpFile);
-    return result;
-  } catch (error) {
-    console.error('Error in detectImageDeepfake:', error);
-    throw error;
-  } finally {
-    // Always clean up tmp file even if model throws
-    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
-  }
+  const results: Array<{ label: string; score: number }> = await res.json();
+
+  const fakeEntry = results.find(r => r.label.toLowerCase().includes('fake'));
+  const realEntry = results.find(r => r.label.toLowerCase().includes('real'));
+  const fakeScore = fakeEntry?.score ?? 1 - (realEntry?.score ?? 0.5);
+  const realScore = 1 - fakeScore;
+
+  let verdict: 'deepfake' | 'uncertain' | 'authentic';
+  if (fakeScore >= 0.65) verdict = 'deepfake';
+  else if (fakeScore <= 0.35) verdict = 'authentic';
+  else verdict = 'uncertain';
+
+  return {
+    verdict,
+    confidence: verdict === 'deepfake' ? fakeScore : realScore,
+    scores: { fake: parseFloat(fakeScore.toFixed(4)), real: parseFloat(realScore.toFixed(4)) },
+    type: 'image',
+  };
 }
