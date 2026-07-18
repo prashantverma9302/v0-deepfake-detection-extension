@@ -1,4 +1,5 @@
-const HF_API = 'https://api-inference.huggingface.co/models';
+const HF_API = 'https://router.huggingface.co/hf-inference/models';
+
 const TOKEN = process.env.HF_API_TOKEN;
 const AUDIO_MODEL = 'MelyssaMT/deepfake-audio-detection';
 

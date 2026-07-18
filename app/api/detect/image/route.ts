@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     let buffer: Buffer;
 
     if (imageBase64) {
-      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '');
       buffer = Buffer.from(base64Data, 'base64');
     } else {
       const res = await fetch(imageUrl);

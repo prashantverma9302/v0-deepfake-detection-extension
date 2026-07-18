@@ -1,4 +1,5 @@
-const HF_API = 'https://api-inference.huggingface.co/models';
+const HF_API = 'https://router.huggingface.co/hf-inference/models';
+
 const TOKEN = process.env.HF_API_TOKEN;
 const IMAGE_MODEL = 'dima806/deepfake_vs_real_image_detection';
 

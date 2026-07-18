@@ -84,12 +84,12 @@ export function DemoSection() {
       const base64 = await fileToBase64(file);
 
       if (type === "image") {
-        await detectImage(base64);
-      } else if (type === "video") {
-        await detectVideo(file);
-      } else if (type === "audio") {
-        await detectAudio(base64);
-      }
+  await detectImage(base64);
+} else if (type === "video") {
+  await detectVideo(file);
+} else if (type === "audio") {
+  await detectAudio(file);     // <-- pass the File, not base64
+}
     } catch (err) {
       setError(err instanceof Error ? err.message : "Detection failed");
     } finally {
@@ -122,23 +122,23 @@ export function DemoSection() {
     setResult(data);
   };
 
-  const detectVideo = async (file: File) => {
-    const frames = await extractVideoFrames(file, 5);
-    
-    const response = await fetch("/api/detect/video", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ frames }),
-    });
+const detectVideo = async (file: File) => {
+  const frames = await extractVideoFrames(file, 5); // your existing frame extractor
 
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || "Video detection failed");
-    }
+  const response = await fetch("/api/detect/video", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ frames }),
+  });
 
+  if (!response.ok) {
     const data = await response.json();
-    setResult(data);
-  };
+    throw new Error(data.error || "Video detection failed");
+  }
+
+  const data = await response.json();
+  setResult(data);
+};
 
   const extractVideoFrames = (file: File, numFrames: number): Promise<string[]> => {
     return new Promise((resolve, reject) => {
@@ -192,21 +192,23 @@ export function DemoSection() {
     });
   };
 
-  const detectAudio = async (base64: string) => {
-    const response = await fetch("/api/detect/audio", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ audioBase64: base64 }),
-    });
+const detectAudio = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
 
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || "Audio detection failed");
-    }
+  const response = await fetch("/api/detect/audio", {
+    method: "POST",
+    body: formData,   // Do NOT set Content-Type header – browser sets it with boundary
+  });
 
+  if (!response.ok) {
     const data = await response.json();
-    setResult(data);
-  };
+    throw new Error(data.error || "Audio detection failed");
+  }
+
+  const data = await response.json();
+  setResult(data);
+};
 
   const scanWebsite = async () => {
     if (!websiteUrl.trim()) {

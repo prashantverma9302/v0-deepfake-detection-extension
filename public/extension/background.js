@@ -1,5 +1,14 @@
 // DeepFake Shield - Background Service Worker
-const API_URL = "https://v0-deepfake-detection-extension-pi.vercel.app";
+const DEFAULT_API_URL = "https://v0-deepfake-detection-extension-pi.vercel.app";
+
+// Helper to retrieve the API URL dynamically from storage
+async function getApiUrl() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(["apiUrl"], (result) => {
+      resolve(result.apiUrl || DEFAULT_API_URL);
+    });
+  });
+}
 
 // Store results per tab
 const tabResults = {};
@@ -55,7 +64,8 @@ async function scanImage(data, tabId) {
   results.status = "scanning";
 
   try {
-    const response = await fetch(API_URL + "/api/detect/image", {
+    const apiUrl = await getApiUrl();
+    const response = await fetch(apiUrl + "/api/detect/image", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -88,7 +98,8 @@ async function scanVideo(data, tabId) {
   results.status = "scanning";
 
   try {
-    const response = await fetch(API_URL + "/api/detect/video", {
+    const apiUrl = await getApiUrl();
+    const response = await fetch(apiUrl + "/api/detect/video", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ frames: data.frames })
@@ -118,7 +129,8 @@ async function scanAudio(data, tabId) {
   results.status = "scanning";
 
   try {
-    const response = await fetch(API_URL + "/api/detect/audio", {
+    const apiUrl = await getApiUrl();
+    const response = await fetch(apiUrl + "/api/detect/audio", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
